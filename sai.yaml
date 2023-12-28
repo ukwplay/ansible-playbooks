@@ -1,0 +1,129 @@
+---
+- hosts: web
+  
+  tasks:
+    - name: Create a VPC
+      ec2_vpc_net:
+        name: "ansible-vpc"
+        cidr_block: 10.0.0.0/16
+        region: us-east-2
+        state: present
+        tags:
+          Name: "ansible-vpc"
+      register: vpc1
+
+    - name: Create an internet gateway
+      ec2_vpc_igw:
+        vpc_id: "{{ vpc1.vpc.id }}"
+        region: us-east-2
+        state: present
+        tags:
+          Name: "ansible-igw"
+      register: igw    
+  
+    - name: Create a subnet
+      amazon.aws.ec2_vpc_subnet:
+         state: present
+         vpc_id: "{{ vpc1.vpc.id }}"
+         cidr: 10.0.0.0/24
+         region: us-east-2
+         az: us-east-2a
+         map_public: true
+         tags:
+           Name: "pub-1"
+      register: pub1a
+
+    - name: Create a subnet
+      amazon.aws.ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc1.vpc.id }}"
+        cidr: 10.0.1.0/24
+        region: us-east-2
+        az: us-east-2b
+        map_public: true
+        tags:
+          Name: "pub-2"
+      register: pub2a
+
+    - name: Create a subnet
+      amazon.aws.ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc1.vpc.id }}"
+        cidr: 10.0.2.0/24
+        region: us-east-2
+        az: "us-east-2c"
+        map_public: false
+        tags:
+          Name: "pri-1a"
+      register: pri1a
+    - name: Create a subnet
+      amazon.aws.ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc1.vpc.id }}"
+        cidr: 10.0.3.0/24
+        region: us-east-2
+        az: "us-east-2c"
+        map_public: false
+        tags:
+          Name: "pri-1b"
+      register: pri1b
+
+    - name: Create a route table
+      amazon.aws.ec2_vpc_route_table:
+        state: present
+        vpc_id: "{{ vpc1.vpc.id }}"
+        region: us-east-2
+        tags:
+          Name: "public-route-table"
+        subnets:
+          - "{{ pub1a.subnet.id }}"
+          - "{{ pub2a.subnet.id }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw.gateway_id }}"
+      register: pub_route_table
+
+    - name: Create Security Group
+      amazon.aws.ec2_security_group:
+        name: my-sg
+        description: My-sg
+        vpc_id: "{{ vpc1.vpc.id }}"
+        region: us-east-2
+        state: present
+        tags:
+          Name: my-sg
+        rules:
+          - proto: tcp
+            ports:
+              - 22
+              - 80
+            cidr_ip: 0.0.0.0/0
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+      register: ansible_sg
+
+    - name: Create Key Pair
+      amazon.aws.ec2_key:
+        name: ansible_keypair
+        region: us-east-2
+        state: present
+      register: keypair
+
+    - name: Launch instance
+      amazon.aws.ec2_instance:
+        name: server
+        instance_type: t2.micro
+        image_id: ami-05fb0b8c1424f266b
+        vpc_subnet_id: "{{ pub1a.subnet.id }}"
+        region: us-east-2
+        state: absent
+        key_name: ansible_keypair
+        security_group: my-sg
+        network:
+          assign_public_ip: true
+        user_data: "{{ lookup('file', '/home/ec2-user/usr.sh') }}"
+        tags:
+          Name: my_instance
+      register: ec2
+
